@@ -38,6 +38,7 @@ namespace EnterpriseWifiPasswordRecover
         {
             // The location where the magic is stored in the registry
             string keyName = @"Software\Microsoft\Wlansvc\UserData\Profiles\";
+            string keyName2 = @"Software\Microsoft\Wlansvc\Profiles\";
 
             // Will contain a list of places to search in the registry for profiles
             List<RegistryKey> possibleKeys = new List<RegistryKey>();
@@ -56,6 +57,7 @@ namespace EnterpriseWifiPasswordRecover
 
                         // Try to open the store for wireless keys
                         possibleKeys.Add(possibleKey.OpenSubKey(keyName));
+                        possibleKeys.Add(possibleKey.OpenSubKey(keyName2));
                     }
                     catch
                     {
@@ -72,6 +74,7 @@ namespace EnterpriseWifiPasswordRecover
             try
             {
                 possibleKeys.Add(Registry.LocalMachine.OpenSubKey(keyName));
+                possibleKeys.Add(Registry.LocalMachine.OpenSubKey(keyName2));
             }
             catch
             {
@@ -82,6 +85,7 @@ namespace EnterpriseWifiPasswordRecover
             try
             {
                 possibleKeys.Add(Registry.CurrentUser.OpenSubKey(keyName));
+                possibleKeys.Add(Registry.CurrentUser.OpenSubKey(keyName2));
             }
             catch
             {
@@ -93,6 +97,7 @@ namespace EnterpriseWifiPasswordRecover
             {
                 // Grab the registry location
                 RegistryKey key = possibleKeys[i];
+                
                 if (key == null) continue;
                 try
                 {
@@ -103,6 +108,8 @@ namespace EnterpriseWifiPasswordRecover
                         // Open the subkey (a profile)
                         string subKey = subKeys[j];
                         RegistryKey subKey2 = key.OpenSubKey(subKey);
+
+                        Console.WriteLine(subKey);
 
                         // Is there MSMUserData? This is where the gold is stored
                         byte[] theData = (byte[])subKey2.GetValue("MSMUserData", null);
@@ -317,6 +324,7 @@ namespace EnterpriseWifiPasswordRecover
         {
             // Used to find the start of the username / password blob
             byte[] searchForUsername = { 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 };
+            byte[] searchForUsername2 = { 0x03, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00 };
             byte[] nullArray = { 0x00 };
 
             // Ensure we have a store for the username
@@ -353,7 +361,62 @@ namespace EnterpriseWifiPasswordRecover
             }
             else
             {
-                Console.WriteLine("Failed to find username field!");
+                // Failed to find the blob, maybe it's not encrypted?
+                
+                usernameFieldStart = SigScan(toDecrypt, searchForUsername2);
+
+                Console.WriteLine(usernameFieldStart);
+
+                if(usernameFieldStart != -1)
+                {
+                    // Looks good?
+
+                    // There will be some null bytes, skip until the end of those
+                    usernameFieldStart += searchForUsername2.Length;
+                    usernameFieldStart = SigScan(toDecrypt, nullArray, usernameFieldStart, true);
+
+                    // Find where the username field ends
+                    int usernameFieldEnd = SigScan(toDecrypt, nullArray, usernameFieldStart + 1);
+
+                    byte[] usernameField = Slice(toDecrypt, usernameFieldStart, usernameFieldEnd);
+                    theStore.username = Encoding.ASCII.GetString(usernameField);
+
+                    // Keep searching, the password is probably here too!
+                    int passowrdFieldStart = SigScan(toDecrypt, nullArray, usernameFieldEnd + 1, true);
+
+                    if(passowrdFieldStart != -1)
+                    {
+                        int passwordFieldEnd = SigScan(toDecrypt, nullArray, passowrdFieldStart + 1);
+
+                        if(passwordFieldEnd != -1)
+                        {
+                            byte[] passwordField = Slice(toDecrypt, passowrdFieldStart, passwordFieldEnd);
+                            theStore.password = Encoding.ASCII.GetString(passwordField);
+
+                            // Maybe there is a domain too?
+                            int domainFieldStart = SigScan(toDecrypt, nullArray, passwordFieldEnd + 1, true);
+
+                            if (domainFieldStart != -1)
+                            {
+                                int domainFieldEnd = SigScan(toDecrypt, nullArray, domainFieldStart + 1);
+
+                                if(domainFieldEnd != -1)
+                                {
+                                    byte[] domainField = Slice(toDecrypt, domainFieldStart, domainFieldEnd);
+
+                                    if(domainField[0] != 0x01)
+                                    {
+                                        theStore.domain = Encoding.ASCII.GetString(domainField);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Failed to find username field!");
+                }
             }
 
             return theStore;
@@ -401,6 +464,9 @@ namespace EnterpriseWifiPasswordRecover
             }
             else
             {
+                // Ok, we failed to find an encrypted blob, maybe it's not encrypted?
+                //searchForPassword = { 0x03, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01 };
+
                 Console.WriteLine("Failed to find an encrypted password blob :/");
             }
             

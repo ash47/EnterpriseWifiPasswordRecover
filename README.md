@@ -30,11 +30,14 @@ This is a tool that recovers WPA2 Enterprise Wifi Credentials from a machine.
    - `C:\ProgramData\Microsoft\Wlansvc\Profiles\Interfaces\{interfaceID}\{profileID}.xml`
  - The following registry entry is created to store the enterprise credentials
    - `HKEY_CURRENT_USER\Software\Microsoft\Wlansvc\UserData\Profiles\{profileID}\`
+   - Sometimes it is stored in: `HKEY_LOCAL_MACHINE\Software\Microsoft\Wlansvc\UserData\Profiles\{profileID}\`
+   - Sometimes it is stored in: `HKEY_LOCAL_MACHINE\Software\Microsoft\Wlansvc\Profiles\{profileID}\`
    - The "MSMUserData" binary value contains the encrypted credentials
    - In Windows 10, the first layer can be decrypted using the following C# code, run in the context of the system user:
      - `ProtectedData.Unprotect(<data>, null, DataProtectionScope.LocalMachine);`
    - This will decrypt and the result will be a blog of binary data, looking at the data, it's easy to spot the domain and username in clear text.
-   - The username comes directly after the following bytes `{ 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 }`, and terminates after a null byte.
+   - The username comes directly after the following bytes `{ 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 }`, and terminates after a null byte if it is encrypted.
+     - If the blob isn't encrypted with the user's credentials, then the username will be after `{ 0x03, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00 }` in plain text, then a series of null bytes, followed by a clear text password, then a series of null bytes and possibly a domain, if you reach `0x01` then there is no domain.
    - The domain comes after a bunch of the username, there will be a series of null bytes. If you reach a `0xE6` character, then there is no domain present in the credentials.
    - The password is then encrypted again using the same C# call, however, it is encrypted using the context of the user who first connected to the wireless network (or the user who first logged in after the connection was made)
    - The encrypted password section starts with (and includes) the following bytes `{ 0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01 }`
